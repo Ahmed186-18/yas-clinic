@@ -1,0 +1,40 @@
+{
+  "revenues": [
+    {
+      "id": "REV-1001",
+      "patientName": "df",
+      "department": "قسم الطوارئ",
+      "serviceType": "df",
+      "amount": 55,
+      "paymentMethod": "بطاقة ائتمان",
+      "date": "2026-05-31",
+      "status": "مقبول",
+      "notes": ""
+    }
+  ],
+  "expenses": [],
+  "cashbox": [
+    {
+      "id": "CSH-3001",
+      "type": "إيداع",
+      "amount": 100,
+      "description": "رصيد افتتاحي",
+      "employee": "م. أمل أبو عيد",
+      "date": "2026-05-31"
+    }
+  ],
+  "invoices": [],
+  "payroll": [],
+  "assets": [],
+  "settings": {
+    "clinicName": "مركز ياس الطبي",
+    "currency": "₪",
+    "currencyName": "شيكل",
+    "taxRate": 15,
+    "alertLowCash": 5000,
+    "darkMode": false,
+    "adminName": "م. أمل أبو عيد",
+    "adminEmail": "aeid44304@gmail.com",
+    "address": "مواصي خانيونس - شمال مفترق النص ب 200 متر"
+  }
+}

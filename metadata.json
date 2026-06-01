@@ -1,0 +1,6 @@
+{
+  "name": "MedFinance AR",
+  "description": "نظام الإدارة المالية الشامل وإدارة الأصول والصيانة للمراكز الطبية والعيادات",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

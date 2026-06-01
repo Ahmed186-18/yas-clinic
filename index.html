@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MedFinance AR - نظام الإدارة المالية وأصول الأجهزة الطبية</title>
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0D9488" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/service-worker.js")
+            .then((reg) => console.log("Service worker registered successfully:", reg.scope))
+            .catch((err) => console.error("Service worker registration failed:", err));
+        });
+      }
+    </script>
+    <!-- Tajawal & Cairo Fonts for pristine Arabic healthcare typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&family=Tajawal:wght@300;400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-slate-50 text-slate-900 transition-colors duration-300">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
