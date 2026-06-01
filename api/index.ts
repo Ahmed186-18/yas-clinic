@@ -1,390 +1,339 @@
 import express from "express";
-import { supabaseAdmin, initializeSettings } from "./supabaseAdmin.js";
-import { fileURLToPath } from "url";
 import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const DB_FILE = path.join(__dirname, "../db.json");
 
 app.use(express.json());
 
-// Initialize settings on startup
-await initializeSettings();
+// Helper to write default Arabic seed data
+function getInitialData() {
+  return {
+    revenues: [],
+    expenses: [],
+    cashbox: [],
+    invoices: [],
+    payroll: [],
+    assets: [],
+    settings: {
+      clinicName: "مركز ياس الطبي",
+      currency: "₪",
+      currencyName: "شيكل",
+      taxRate: 15,
+      alertLowCash: 5000,
+      darkMode: false,
+      adminName: "م. أمل أبو عيد",
+      adminEmail: "aeid44304@gmail.com",
+      address: "مواصي خانيونس - شمال مفترق النص ب 200 متر"
+    }
+  };
+}
+
+function isPlainObject(value: any): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeDb(data: any) {
+  const initial = getInitialData();
+  return {
+    revenues: Array.isArray(data?.revenues) ? data.revenues : [],
+    expenses: Array.isArray(data?.expenses) ? data.expenses : [],
+    cashbox: Array.isArray(data?.cashbox) ? data.cashbox : [],
+    invoices: Array.isArray(data?.invoices) ? data.invoices : [],
+    payroll: Array.isArray(data?.payroll) ? data.payroll : [],
+    assets: Array.isArray(data?.assets) ? data.assets : [],
+    settings: isPlainObject(data?.settings) ? { ...initial.settings, ...data.settings } : initial.settings,
+  };
+}
+
+// Ensure database file exists
+function loadDb() {
+  if (!fs.existsSync(DB_FILE)) {
+    const data = getInitialData();
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+    return data;
+  }
+  try {
+    const raw = fs.readFileSync(DB_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!isPlainObject(parsed)) {
+      throw new Error("Invalid DB format");
+    }
+    const normalized = normalizeDb(parsed);
+    if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+      saveDb(normalized);
+    }
+    return normalized;
+  } catch (err) {
+    const data = getInitialData();
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+    return data;
+  }
+}
+
+function saveDb(data: any) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+}
 
 // GET all data
-app.get("/all", async (req, res) => {
-  try {
-    const [revenues, expenses, cashbox, invoices, payroll, assets, settings] = await Promise.all([
-      supabaseAdmin.from("revenues").select("*").order("date", { ascending: false }),
-      supabaseAdmin.from("expenses").select("*").order("date", { ascending: false }),
-      supabaseAdmin.from("cashbox").select("*").order("date", { ascending: false }),
-      supabaseAdmin.from("invoices").select("*").order("date", { ascending: false }),
-      supabaseAdmin.from("payroll").select("*").order("date", { ascending: false }),
-      supabaseAdmin.from("assets").select("*").order("created_at", { ascending: false }),
-      supabaseAdmin.from("settings").select("*").eq("id", "default").single(),
-    ]);
-
-    res.json({
-      revenues: revenues.data || [],
-      expenses: expenses.data || [],
-      cashbox: cashbox.data || [],
-      invoices: invoices.data || [],
-      payroll: payroll.data || [],
-      assets: assets.data || [],
-      settings: settings.data || {},
-    });
-  } catch (error) {
-    console.error("Error fetching data:", error);
-    res.status(500).json({ error: "فشل تحميل البيانات" });
-  }
+app.get("/all", (req, res) => {
+  const db = loadDb();
+  res.json(db);
 });
 
 // SYNC entire database from client
-app.post("/sync", async (req, res) => {
-  try {
-    if (!req.body || typeof req.body !== "object") {
-      return res.status(400).json({ error: "Invalid sync payload" });
-    }
-    // Verification only - actual sync handled by individual endpoints
+app.post("/sync", (req, res) => {
+  if (req.body && typeof req.body === "object") {
+    saveDb(req.body);
     res.json(req.body);
-  } catch (error) {
-    console.error("Error syncing:", error);
-    res.status(500).json({ error: "فشل مزامنة البيانات" });
+  } else {
+    res.status(400).json({ error: "Invalid sync database payload" });
   }
 });
 
 // Update settings
-app.put("/settings", async (req, res) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("settings")
-      .update(req.body)
-      .eq("id", "default")
-      .select()
-      .single();
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error("Error updating settings:", error);
-    res.status(500).json({ error: "فشل تحديث الإعدادات" });
-  }
+app.put("/settings", (req, res) => {
+  const db = loadDb();
+  db.settings = { ...db.settings, ...req.body };
+  saveDb(db);
+  res.json(db.settings);
 });
 
 // REVENUE CRUD
-app.post("/revenues", async (req, res) => {
-  try {
-    const newRevenue = {
-      id: `REV-${Date.now()}`,
-      ...req.body,
+app.post("/revenues", (req, res) => {
+  const db = loadDb();
+  const newRevenue = {
+    id: `REV-${1000 + db.revenues.length + 1}`,
+    ...req.body,
+    date: req.body.date || new Date().toISOString().split("T")[0]
+  };
+  db.revenues.unshift(newRevenue);
+  if (req.body.paymentMethod === "نقدي" && req.body.amount) {
+    const newCash = {
+      id: `CSH-${3000 + db.cashbox.length + 1}`,
+      type: "إيداع",
+      description: `إيراد نقدي تلقائي - ${req.body.patientName}`,
+      amount: Number(req.body.amount),
       date: req.body.date || new Date().toISOString().split("T")[0],
+      employee: "النظام المالي الموحد"
     };
+    db.cashbox.unshift(newCash);
+  }
+  saveDb(db);
+  res.json(newRevenue);
+});
 
-    const { data, error } = await supabaseAdmin.from("revenues").insert([newRevenue]).select().single();
-
-    if (error) throw error;
-
-    // Auto-add cash transaction if payment method is cash
-    if (req.body.payment_method === "نقدي" && req.body.amount) {
-      await supabaseAdmin.from("cashbox").insert([
-        {
-          id: `CSH-${Date.now()}`,
-          type: "إيداع",
-          description: `إيراد نقدي تلقائي - ${req.body.patient_name}`,
-          amount: Number(req.body.amount),
-          date: newRevenue.date,
-          employee: "النظام المالي الموحد",
-        },
-      ]);
-    }
-
-    res.json(data);
-  } catch (error) {
-    console.error("Error adding revenue:", error);
-    res.status(500).json({ error: "فشل إضافة الإيراد" });
+app.put("/revenues/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.revenues.findIndex((r: any) => r.id === req.params.id);
+  if (index !== -1) {
+    db.revenues[index] = { ...db.revenues[index], ...req.body };
+    saveDb(db);
+    res.json(db.revenues[index]);
+  } else {
+    res.status(404).json({ error: "Revenue not found" });
   }
 });
 
-app.put("/revenues/:id", async (req, res) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("revenues")
-      .update(req.body)
-      .eq("id", req.params.id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) return res.status(404).json({ error: "الإيراد غير موجود" });
-
-    res.json(data);
-  } catch (error) {
-    console.error("Error updating revenue:", error);
-    res.status(500).json({ error: "فشل تحديث الإيراد" });
-  }
-});
-
-app.delete("/revenues/:id", async (req, res) => {
-  try {
-    const { error } = await supabaseAdmin.from("revenues").delete().eq("id", req.params.id);
-
-    if (error) throw error;
+app.delete("/revenues/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.revenues.findIndex((r: any) => r.id === req.params.id);
+  if (index !== -1) {
+    db.revenues.splice(index, 1);
+    saveDb(db);
     res.json({ success: true });
-  } catch (error) {
-    console.error("Error deleting revenue:", error);
-    res.status(500).json({ error: "فشل حذف الإيراد" });
+  } else {
+    res.status(404).json({ error: "Revenue not found" });
   }
 });
 
 // EXPENSES CRUD
-app.post("/expenses", async (req, res) => {
-  try {
-    const newExpense = {
-      id: `EXP-${Date.now()}`,
-      ...req.body,
-      date: req.body.date || new Date().toISOString().split("T")[0],
-    };
+app.post("/expenses", (req, res) => {
+  const db = loadDb();
+  const newExpense = {
+    id: `EXP-${2000 + db.expenses.length + 1}`,
+    ...req.body,
+    date: req.body.date || new Date().toISOString().split("T")[0]
+  };
+  db.expenses.unshift(newExpense);
+  saveDb(db);
+  res.json(newExpense);
+});
 
-    const { data, error } = await supabaseAdmin.from("expenses").insert([newExpense]).select().single();
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error("Error adding expense:", error);
-    res.status(500).json({ error: "فشل إضافة المصروف" });
+app.put("/expenses/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.expenses.findIndex((e: any) => e.id === req.params.id);
+  if (index !== -1) {
+    db.expenses[index] = { ...db.expenses[index], ...req.body };
+    saveDb(db);
+    res.json(db.expenses[index]);
+  } else {
+    res.status(404).json({ error: "Expense not found" });
   }
 });
 
-app.put("/expenses/:id", async (req, res) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("expenses")
-      .update(req.body)
-      .eq("id", req.params.id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) return res.status(404).json({ error: "المصروف غير موجود" });
-
-    res.json(data);
-  } catch (error) {
-    console.error("Error updating expense:", error);
-    res.status(500).json({ error: "فشل تحديث المصروف" });
-  }
-});
-
-app.delete("/expenses/:id", async (req, res) => {
-  try {
-    const { error } = await supabaseAdmin.from("expenses").delete().eq("id", req.params.id);
-
-    if (error) throw error;
+app.delete("/expenses/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.expenses.findIndex((e: any) => e.id === req.params.id);
+  if (index !== -1) {
+    db.expenses.splice(index, 1);
+    saveDb(db);
     res.json({ success: true });
-  } catch (error) {
-    console.error("Error deleting expense:", error);
-    res.status(500).json({ error: "فشل حذف المصروف" });
+  } else {
+    res.status(404).json({ error: "Expense not found" });
   }
 });
 
 // CASHBOX CRUD
-app.post("/cashbox", async (req, res) => {
-  try {
-    const newCash = {
-      id: `CSH-${Date.now()}`,
-      ...req.body,
-      date: req.body.date || new Date().toISOString().split("T")[0],
-    };
+app.post("/cashbox", (req, res) => {
+  const db = loadDb();
+  const newCash = {
+    id: `CSH-${3000 + db.cashbox.length + 1}`,
+    ...req.body,
+    date: req.body.date || new Date().toISOString().split("T")[0]
+  };
+  db.cashbox.unshift(newCash);
+  saveDb(db);
+  res.json(newCash);
+});
 
-    const { data, error } = await supabaseAdmin.from("cashbox").insert([newCash]).select().single();
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error("Error adding cashbox transaction:", error);
-    res.status(500).json({ error: "فشل إجراء حركة الصندوق" });
+app.put("/cashbox/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.cashbox.findIndex((c: any) => c.id === req.params.id);
+  if (index !== -1) {
+    db.cashbox[index] = { ...db.cashbox[index], ...req.body };
+    saveDb(db);
+    res.json(db.cashbox[index]);
+  } else {
+    res.status(404).json({ error: "Cash transaction not found" });
   }
 });
 
-app.put("/cashbox/:id", async (req, res) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("cashbox")
-      .update(req.body)
-      .eq("id", req.params.id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) return res.status(404).json({ error: "المعاملة غير موجودة" });
-
-    res.json(data);
-  } catch (error) {
-    console.error("Error updating cashbox:", error);
-    res.status(500).json({ error: "فشل تحديث معاملة الصندوق" });
-  }
-});
-
-app.delete("/cashbox/:id", async (req, res) => {
-  try {
-    const { error } = await supabaseAdmin.from("cashbox").delete().eq("id", req.params.id);
-
-    if (error) throw error;
+app.delete("/cashbox/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.cashbox.findIndex((c: any) => c.id === req.params.id);
+  if (index !== -1) {
+    db.cashbox.splice(index, 1);
+    saveDb(db);
     res.json({ success: true });
-  } catch (error) {
-    console.error("Error deleting cashbox:", error);
-    res.status(500).json({ error: "فشل حذف معاملة الصندوق" });
+  } else {
+    res.status(404).json({ error: "Cash transaction not found" });
   }
 });
 
 // INVOICES CRUD
-app.post("/invoices", async (req, res) => {
-  try {
-    const newInvoice = {
-      id: `INV-${Date.now()}`,
-      ...req.body,
-      date: req.body.date || new Date().toISOString().split("T")[0],
-    };
+app.post("/invoices", (req, res) => {
+  const db = loadDb();
+  const newInvoice = {
+    id: `INV-${4000 + db.invoices.length + 1}`,
+    ...req.body,
+    date: req.body.date || new Date().toISOString().split("T")[0]
+  };
+  db.invoices.unshift(newInvoice);
+  saveDb(db);
+  res.json(newInvoice);
+});
 
-    const { data, error } = await supabaseAdmin.from("invoices").insert([newInvoice]).select().single();
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error("Error adding invoice:", error);
-    res.status(500).json({ error: "فشل إضافة الفاتورة" });
+app.put("/invoices/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.invoices.findIndex((i: any) => i.id === req.params.id);
+  if (index !== -1) {
+    db.invoices[index] = { ...db.invoices[index], ...req.body };
+    saveDb(db);
+    res.json(db.invoices[index]);
+  } else {
+    res.status(404).json({ error: "Invoice not found" });
   }
 });
 
-app.put("/invoices/:id", async (req, res) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("invoices")
-      .update(req.body)
-      .eq("id", req.params.id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) return res.status(404).json({ error: "الفاتورة غير موجودة" });
-
-    res.json(data);
-  } catch (error) {
-    console.error("Error updating invoice:", error);
-    res.status(500).json({ error: "فشل تحديث الفاتورة" });
-  }
-});
-
-app.delete("/invoices/:id", async (req, res) => {
-  try {
-    const { error } = await supabaseAdmin.from("invoices").delete().eq("id", req.params.id);
-
-    if (error) throw error;
+app.delete("/invoices/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.invoices.findIndex((i: any) => i.id === req.params.id);
+  if (index !== -1) {
+    db.invoices.splice(index, 1);
+    saveDb(db);
     res.json({ success: true });
-  } catch (error) {
-    console.error("Error deleting invoice:", error);
-    res.status(500).json({ error: "فشل حذف الفاتورة" });
+  } else {
+    res.status(404).json({ error: "Invoice not found" });
   }
 });
 
 // PAYROLL CRUD
-app.post("/payroll", async (req, res) => {
-  try {
-    const newPayroll = {
-      id: `PAY-${Date.now()}`,
-      ...req.body,
-      date: req.body.date || new Date().toISOString().split("T")[0],
-    };
+app.post("/payroll", (req, res) => {
+  const db = loadDb();
+  const newPayroll = {
+    id: `PAY-${5000 + db.payroll.length + 1}`,
+    ...req.body,
+    date: req.body.date || new Date().toISOString().split("T")[0]
+  };
+  db.payroll.unshift(newPayroll);
+  saveDb(db);
+  res.json(newPayroll);
+});
 
-    const { data, error } = await supabaseAdmin.from("payroll").insert([newPayroll]).select().single();
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error("Error adding payroll:", error);
-    res.status(500).json({ error: "فشل إضافة الراتب" });
+app.put("/payroll/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.payroll.findIndex((p: any) => p.id === req.params.id);
+  if (index !== -1) {
+    db.payroll[index] = { ...db.payroll[index], ...req.body };
+    saveDb(db);
+    res.json(db.payroll[index]);
+  } else {
+    res.status(404).json({ error: "Payroll not found" });
   }
 });
 
-app.put("/payroll/:id", async (req, res) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("payroll")
-      .update(req.body)
-      .eq("id", req.params.id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) return res.status(404).json({ error: "سجل الراتب غير موجود" });
-
-    res.json(data);
-  } catch (error) {
-    console.error("Error updating payroll:", error);
-    res.status(500).json({ error: "فشل تحديث الراتب" });
-  }
-});
-
-app.delete("/payroll/:id", async (req, res) => {
-  try {
-    const { error } = await supabaseAdmin.from("payroll").delete().eq("id", req.params.id);
-
-    if (error) throw error;
+app.delete("/payroll/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.payroll.findIndex((p: any) => p.id === req.params.id);
+  if (index !== -1) {
+    db.payroll.splice(index, 1);
+    saveDb(db);
     res.json({ success: true });
-  } catch (error) {
-    console.error("Error deleting payroll:", error);
-    res.status(500).json({ error: "فشل حذف الراتب" });
+  } else {
+    res.status(404).json({ error: "Payroll not found" });
   }
 });
 
 // ASSETS CRUD
-app.post("/assets", async (req, res) => {
-  try {
-    const newAsset = {
-      id: `AST-${Date.now()}`,
-      ...req.body,
-      date: req.body.date || new Date().toISOString().split("T")[0],
-    };
+app.post("/assets", (req, res) => {
+  const db = loadDb();
+  const newAsset = {
+    id: `AST-${6000 + db.assets.length + 1}`,
+    ...req.body,
+    date: req.body.date || new Date().toISOString().split("T")[0]
+  };
+  db.assets.unshift(newAsset);
+  saveDb(db);
+  res.json(newAsset);
+});
 
-    const { data, error } = await supabaseAdmin.from("assets").insert([newAsset]).select().single();
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error("Error adding asset:", error);
-    res.status(500).json({ error: "فشل إضافة الأصل" });
+app.put("/assets/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.assets.findIndex((a: any) => a.id === req.params.id);
+  if (index !== -1) {
+    db.assets[index] = { ...db.assets[index], ...req.body };
+    saveDb(db);
+    res.json(db.assets[index]);
+  } else {
+    res.status(404).json({ error: "Asset not found" });
   }
 });
 
-app.put("/assets/:id", async (req, res) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("assets")
-      .update(req.body)
-      .eq("id", req.params.id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) return res.status(404).json({ error: "الأصل غير موجود" });
-
-    res.json(data);
-  } catch (error) {
-    console.error("Error updating asset:", error);
-    res.status(500).json({ error: "فشل تحديث الأصل" });
-  }
-});
-
-app.delete("/assets/:id", async (req, res) => {
-  try {
-    const { error } = await supabaseAdmin.from("assets").delete().eq("id", req.params.id);
-
-    if (error) throw error;
+app.delete("/assets/:id", (req, res) => {
+  const db = loadDb();
+  const index = db.assets.findIndex((a: any) => a.id === req.params.id);
+  if (index !== -1) {
+    db.assets.splice(index, 1);
+    saveDb(db);
     res.json({ success: true });
-  } catch (error) {
-    console.error("Error deleting asset:", error);
-    res.status(500).json({ error: "فشل حذف الأصل" });
+  } else {
+    res.status(404).json({ error: "Asset not found" });
   }
 });
 
